@@ -638,7 +638,95 @@ export default function SessionsPage() {
                       : 'bg-gray-100 text-gray-900'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  <div className="prose prose-sm max-w-none">
+                    {message.content.split('\n').map((line, lineIndex) => {
+                      if (line.startsWith('=== ANALYSIS ===')) {
+                        return (
+                          <div key={lineIndex} className="mb-4">
+                            <h3 className="text-lg font-semibold text-blue-600 mb-2 flex items-center">
+                              <span className="mr-2">📊</span>
+                              Analysis
+                            </h3>
+                          </div>
+                        )
+                      } else if (line.startsWith('=== VARIATION')) {
+                        const variationNum = line.match(/VARIATION (\d+)/)?.[1]
+                        return (
+                          <div key={lineIndex} className="mb-4">
+                            <h4 className="text-md font-semibold text-green-600 mb-2 flex items-center">
+                              <span className="mr-2">🎯</span>
+                              Variation {variationNum}
+                            </h4>
+                          </div>
+                        )
+                      } else if (line.includes('Headline:')) {
+                        const headline = line.replace('Headline:', '').trim()
+                        return (
+                          <div key={lineIndex} className="mb-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Headline:</span>
+                            <p className="text-sm font-semibold text-gray-900 mt-1">{headline}</p>
+                          </div>
+                        )
+                      } else if (line.includes('Primary Text:')) {
+                        const text = line.replace('Primary Text:', '').trim()
+                        return (
+                          <div key={lineIndex} className="mb-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Primary Text:</span>
+                            <p className="text-sm text-gray-700 mt-1 leading-relaxed">{text}</p>
+                          </div>
+                        )
+                      } else if (line.includes('Call to Action:')) {
+                        const cta = line.replace('Call to Action:', '').trim()
+                        return (
+                          <div key={lineIndex} className="mb-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Call to Action:</span>
+                            <p className="text-sm font-medium text-blue-600 mt-1">{cta}</p>
+                          </div>
+                        )
+                      } else if (line.includes('Targeting:')) {
+                        const targeting = line.replace('Targeting:', '').trim()
+                        return (
+                          <div key={lineIndex} className="mb-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Targeting:</span>
+                            <p className="text-sm text-gray-700 mt-1">{targeting}</p>
+                          </div>
+                        )
+                      } else if (line.includes('Budget:')) {
+                        const budget = line.replace('Budget:', '').trim()
+                        return (
+                          <div key={lineIndex} className="mb-2">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Budget:</span>
+                            <p className="text-sm font-medium text-green-600 mt-1">{budget}</p>
+                          </div>
+                        )
+                      } else if (line.includes('AI Score:')) {
+                        const score = line.replace('AI Score:', '').trim()
+                        const scoreNum = parseFloat(score)
+                        return (
+                          <div key={lineIndex} className="mb-3">
+                            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">AI Confidence:</span>
+                            <div className="flex items-center mt-1">
+                              <div className="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                <div 
+                                  className="bg-gradient-to-r from-green-400 to-green-600 h-2 rounded-full transition-all duration-300"
+                                  style={{ width: `${scoreNum * 100}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm font-semibold text-green-600">{scoreNum * 100}%</span>
+                            </div>
+                          </div>
+                        )
+                      } else if (line.trim() && !line.startsWith('===')) {
+                        return (
+                          <p key={lineIndex} className="text-sm text-gray-700 leading-relaxed mb-2">
+                            {line}
+                          </p>
+                        )
+                      } else {
+                        return null
+                      }
+                    })}
+                  </div>
                   
                   {/* Show recommendations if this message has them */}
                   {message.recommendations && (

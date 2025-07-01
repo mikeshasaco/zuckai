@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { Brain, Send, Plus, MessageSquare, LogOut, Upload, X, Paperclip } from 'lucide-react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
+import { AdCreativeState, AnalysisSession, ChatMessage, AdRecommendation } from '@/lib/types'
 
 interface Session {
   id: string
@@ -29,39 +30,34 @@ interface Session {
 }
 
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [currentSession, setCurrentSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [messages, setMessages] = useState<Array<{role: 'user' | 'assistant', content: string}>>([])
+  const [sessions, setSessions] = useState<AnalysisSession[]>([])
+  const [currentSession, setCurrentSession] = useState<AnalysisSession | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [newMessage, setNewMessage] = useState('')
+  const [loading, setLoading] = useState(false)
   const [sendingMessage, setSendingMessage] = useState(false)
-  const [adCreative, setAdCreative] = useState({
+  const [creativeAdConfigured, setCreativeAdConfigured] = useState(false)
+  const [firstMessageSent, setFirstMessageSent] = useState(false)
+  const [showCreativeModal, setShowCreativeModal] = useState(false)
+  const [recommendations, setRecommendations] = useState<AdRecommendation[]>([])
+  const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([])
+  const [sessionPhase, setSessionPhase] = useState<'initial' | 'follow_up' | 'performance_review'>('initial')
+
+  const [adCreative, setAdCreative] = useState<AdCreativeState>({
     headline: '',
     primary_text: '',
     call_to_action: '',
     media_url: '',
-    objective: 'TRAFFIC',
+    objective: 'traffic',
     budget_amount: '',
     age_min: '18',
     age_max: '65',
     gender: 'all',
     detailed_targeting: '',
-    destination: [] as string[],
-    app_install_type: [] as string[]
+    destination: [],
+    app_install_type: []
   })
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
-  const [uploadedFileUrl, setUploadedFileUrl] = useState<string>('')
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [collapsedSections, setCollapsedSections] = useState({
-    adCreative: false,
-    campaignSettings: false,
-    targeting: false
-  })
-  const [showCreativeModal, setShowCreativeModal] = useState(false)
-  const [creativeAdConfigured, setCreativeAdConfigured] = useState(false)
-  const [firstMessageSent, setFirstMessageSent] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const router = useRouter()
 
   // Load sessions on mount
@@ -209,7 +205,7 @@ export default function SessionsPage() {
         app_install_type: (session.ad_creative as any).app_install_type || []
       })
       if (session.ad_creative.media_url) {
-        setUploadedFileUrl(session.ad_creative.media_url)
+        setAdCreative(prev => ({ ...prev, media_url: session.ad_creative.media_url }))
       }
 
       // Check if creative ad has been configured (has at least headline or primary_text)
@@ -225,97 +221,20 @@ export default function SessionsPage() {
   }
 
   const handleFileUpload = async (file: File) => {
-    setUploading(true)
-    setUploadProgress(0)
-    
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth')
-        return
-      }
-
-      // Validate file type
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/mov', 'video/avi']
-      if (!allowedTypes.includes(file.type)) {
-        toast.error('Invalid file type. Please upload an image (JPG, PNG, GIF, WebP) or video (MP4, MOV, AVI)')
-        return
-      }
-
-      // Validate file size (10MB limit)
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('File too large. Please upload a file smaller than 10MB')
-        return
-      }
+      if (!user) return
 
       const fileExt = file.name.split('.').pop()
       const fileName = `${user.id}/${Date.now()}.${fileExt}`
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval)
-            return 90
-          }
-          return prev + 10
-        })
-      }, 100)
-
-      // First, try to create the bucket if it doesn't exist
-      try {
-        console.log('Checking for storage bucket...')
-        const { data: buckets, error: listError } = await supabase.storage.listBuckets()
-        
-        if (listError) {
-          console.warn('Could not list buckets:', listError)
-        }
-        
-        const bucketExists = buckets?.some(bucket => bucket.name === 'ad-media')
-        
-        if (!bucketExists) {
-          console.log('Bucket not found, attempting to create ad-media bucket...')
-          const { error: bucketError } = await supabase.storage.createBucket('ad-media', {
-            public: true,
-            allowedMimeTypes: ['image/*', 'video/*'],
-            fileSizeLimit: 10485760 // 10MB
-          })
-          
-          if (bucketError) {
-            console.warn('Bucket creation failed:', bucketError)
-            // For hosted Supabase, the bucket might need to be created manually in the dashboard
-            if (bucketError.message.includes('permission') || bucketError.message.includes('not found')) {
-              toast.error('Storage bucket needs to be created in Supabase dashboard. Please contact support.')
-              return
-            }
-          } else {
-            console.log('Bucket created successfully')
-          }
-        } else {
-          console.log('Bucket already exists')
-        }
-      } catch (bucketError) {
-        console.warn('Bucket check failed, proceeding with upload:', bucketError)
-        // Continue with upload attempt
-      }
-
-      const { data, error } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('ad-media')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
+        .upload(fileName, file)
 
-      clearInterval(progressInterval)
-      setUploadProgress(100)
-
-      if (error) {
-        console.error('Upload error:', error)
-        if (error.message.includes('Bucket not found')) {
-          toast.error('Storage bucket not configured. Please contact support.')
-        } else {
-          toast.error(`Upload failed: ${error.message}`)
-        }
+      if (uploadError) {
+        console.error('Upload error:', uploadError)
+        toast.error('Failed to upload file')
         return
       }
 
@@ -323,64 +242,26 @@ export default function SessionsPage() {
         .from('ad-media')
         .getPublicUrl(fileName)
 
-      setUploadedFile(file)
-      setUploadedFileUrl(publicUrl)
       setAdCreative(prev => ({ ...prev, media_url: publicUrl }))
       toast.success('File uploaded successfully!')
-    } catch (error: any) {
+    } catch (error) {
       console.error('Upload error:', error)
-      toast.error('Failed to upload file. Please try again.')
-    } finally {
-      setUploading(false)
-      setTimeout(() => setUploadProgress(0), 1000)
+      toast.error('Failed to upload file')
     }
   }
 
   const removeUploadedFile = () => {
-    setUploadedFile(null)
-    setUploadedFileUrl('')
     setAdCreative(prev => ({ ...prev, media_url: '' }))
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
   }
 
-  const handleSaveCreativeAd = () => {
-    // Check if creative ad has been configured with minimum required fields
-    const hasMinimumFields = adCreative.headline || adCreative.primary_text || adCreative.media_url
-    
-    if (!hasMinimumFields) {
-      toast.error('Please configure at least one of: headline, description, or media before saving.')
+  const handleCreativeAdSave = () => {
+    if (!adCreative.headline || !adCreative.primary_text || !adCreative.call_to_action) {
+      toast.error('Please fill in all required fields')
       return
     }
-
-    // Additional validation for better ad quality
-    const validationErrors = []
-    
-    if (!adCreative.headline) {
-      validationErrors.push('Headline is recommended for better ad performance')
-    }
-    
-    if (!adCreative.primary_text) {
-      validationErrors.push('Ad description is recommended for better ad performance')
-    }
-    
-    if (!adCreative.objective) {
-      validationErrors.push('Campaign objective is required')
-    }
-    
-    if (!adCreative.budget_amount) {
-      validationErrors.push('Daily budget is required')
-    }
-
-    if (validationErrors.length > 0) {
-      toast.error(`Please complete: ${validationErrors.join(', ')}`)
-      return
-    }
-
     setCreativeAdConfigured(true)
     setShowCreativeModal(false)
-    toast.success('Creative ad settings saved! You can now start chatting with Zuck AI.')
+    toast.success('Creative ad settings saved!')
   }
 
   const sendMessage = async () => {
@@ -476,11 +357,15 @@ export default function SessionsPage() {
       console.log('Sending request to AI with conversation length:', updatedMessages.length)
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        },
         body: JSON.stringify({
           companyDescription: currentSession?.company_description || 'Chat-based analysis',
           adCreative: validatedAdCreative,
-          conversation: updatedMessages
+          conversation: updatedMessages,
+          phase: sessionPhase
         })
       })
 
@@ -491,13 +376,26 @@ export default function SessionsPage() {
       }
 
       const aiResponse = await response.json()
-      const assistantMessage = { role: 'assistant' as const, content: aiResponse.analysis }
-
-      const finalMessages = [...updatedMessages, assistantMessage]
+      
+      // Create a single assistant message that includes everything
+      let finalMessages: ChatMessage[];
+      
+      if (sessionPhase === 'initial' && aiResponse.recommendations) {
+        const recommendationsMessage = { 
+          role: 'assistant' as const, 
+          content: aiResponse.analysis + '\n\nHere are your AI-generated ad variations. Please select the ones you\'d like to test:',
+          recommendations: aiResponse.recommendations
+        }
+        finalMessages = [...updatedMessages, recommendationsMessage];
+        setRecommendations(aiResponse.recommendations)
+        setSessionPhase('follow_up')
+        console.log('Recommendations received:', aiResponse.recommendations)
+      } else {
+        const assistantMessage = { role: 'assistant' as const, content: aiResponse.analysis }
+        finalMessages = [...updatedMessages, assistantMessage];
+      }
+      
       setMessages(finalMessages)
-
-      // Mark that first message has been sent
-      setFirstMessageSent(true)
 
       // Save AI response to database
       console.log('Saving AI response to database')
@@ -510,6 +408,9 @@ export default function SessionsPage() {
         console.error('Save AI response error:', saveError)
         throw saveError
       }
+
+      // Mark that first message has been sent
+      setFirstMessageSent(true)
 
       console.log('Message sent successfully')
 
@@ -531,6 +432,70 @@ export default function SessionsPage() {
       }
     } finally {
       setSendingMessage(false)
+    }
+  }
+
+  const handleRecommendationSelection = async (selectedId: string) => {
+    const isSelected = selectedRecommendations.includes(selectedId)
+    let newSelectedIds: string[]
+    
+    if (isSelected) {
+      newSelectedIds = selectedRecommendations.filter(id => id !== selectedId)
+    } else {
+      newSelectedIds = [...selectedRecommendations, selectedId]
+    }
+    
+    setSelectedRecommendations(newSelectedIds)
+    console.log('Selected recommendations:', newSelectedIds)
+    
+    // If this is the first selection, trigger AI response
+    if (newSelectedIds.length === 1 && !isSelected) {
+      const userMessage = { role: 'user' as const, content: `I've selected variation ${selectedId}. Are these the ads you like the most?` }
+      const updatedMessages = [...messages, userMessage]
+      setMessages(updatedMessages)
+      setNewMessage('')
+      
+      try {
+        // Get AI response about the selection
+        const response = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          },
+          body: JSON.stringify({
+            companyDescription: currentSession?.company_description || 'Chat-based analysis',
+            adCreative: adCreative,
+            conversation: updatedMessages,
+            phase: 'follow_up'
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`Failed to get AI response: ${response.status}`)
+        }
+
+        const aiResponse = await response.json()
+        const assistantMessage = { role: 'assistant' as const, content: aiResponse.analysis }
+
+        const finalMessages = [...updatedMessages, assistantMessage]
+        setMessages(finalMessages)
+
+        // Save to database
+        if (currentSession?.id) {
+          const { error: saveError } = await supabase
+            .from('analysis_sessions')
+            .update({ messages: finalMessages })
+            .eq('id', currentSession.id)
+
+          if (saveError) {
+            console.error('Save selection response error:', saveError)
+          }
+        }
+      } catch (error) {
+        console.error('Error getting selection response:', error)
+        toast.error('Failed to get AI response about your selection')
+      }
     }
   }
 
@@ -674,6 +639,65 @@ export default function SessionsPage() {
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{message.content}</p>
+                  
+                  {/* Show recommendations if this message has them */}
+                  {message.recommendations && (
+                    <div className="mt-4 space-y-3">
+                      {message.recommendations.map((rec: any, recIndex: number) => (
+                        <div
+                          key={recIndex}
+                          className={`border rounded-lg p-3 transition-all ${
+                            selectedRecommendations.includes(rec.id || `variation_${recIndex + 1}`)
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xs font-medium text-gray-700">
+                                  Variation {recIndex + 1}
+                                </span>
+                                {rec.ai_score && (
+                                  <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                                    {(rec.ai_score * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRecommendations.includes(rec.id || `variation_${recIndex + 1}`)}
+                                  onChange={() => handleRecommendationSelection(rec.id || `variation_${recIndex + 1}`)}
+                                  className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  aria-label="checkbox-ai"
+                                />
+                              </div>
+                              
+                              {rec.headline && (
+                                <div className="mb-2">
+                                  <span className="text-xs font-medium text-gray-500">Headline:</span>
+                                  <p className="text-xs text-gray-900 font-medium">{rec.headline}</p>
+                                </div>
+                              )}
+                              
+                              {rec.primary_text && (
+                                <div className="mb-2">
+                                  <span className="text-xs font-medium text-gray-500">Text:</span>
+                                  <p className="text-xs text-gray-900">{rec.primary_text}</p>
+                                </div>
+                              )}
+                              
+                              {rec.call_to_action && (
+                                <div className="mb-2">
+                                  <span className="text-xs font-medium text-gray-500">CTA:</span>
+                                  <p className="text-xs text-gray-900">{rec.call_to_action}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -760,6 +784,8 @@ export default function SessionsPage() {
           </div>
         </div>
 
+
+
         {/* Creative Ad Modal */}
         {showCreativeModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -796,11 +822,13 @@ export default function SessionsPage() {
                         Ad Media
                       </label>
                       
-                      {!uploadedFileUrl ? (
+                      {!adCreative.media_url ? (
                         <div className="space-y-2">
                           <div className="flex items-center space-x-2">
                             <input
-                              ref={fileInputRef}
+                              ref={(input) => {
+                                if (input) input.style.display = 'none'
+                              }}
                               type="file"
                               accept="image/*,video/*"
                               onChange={(e) => {
@@ -810,31 +838,16 @@ export default function SessionsPage() {
                               className="hidden"
                             />
                             <button
-                              onClick={() => fileInputRef.current?.click()}
-                              disabled={uploading}
+                              type="button"
+                              onClick={() => {
+                                const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+                                if (fileInput) fileInput.click()
+                              }}
                               className="flex items-center px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm text-gray-700"
                             >
-                              {uploading ? (
-                                <>
-                                  <Brain className="h-4 w-4 mr-2 animate-spin" />
-                                  Uploading...
-                                </>
-                              ) : (
-                                <>
-                                  <Paperclip className="h-4 w-4 mr-2" />
-                                  Upload Media
-                                </>
-                              )}
+                              📎 Upload Media
                             </button>
                           </div>
-                          {uploading && (
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div 
-                                className="bg-blue-500 h-2 rounded-full transition-all duration-300 ease-out"
-                                style={{ width: `${uploadProgress}%` }}
-                              ></div>
-                            </div>
-                          )}
                           <p className="text-xs text-gray-500">
                             Supported: JPG, PNG, GIF, WebP, MP4, MOV, AVI (max 10MB)
                           </p>
@@ -842,15 +855,15 @@ export default function SessionsPage() {
                       ) : (
                         <div className="flex items-center space-x-2">
                           <div className="flex-1">
-                            {uploadedFileUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                            {adCreative.media_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                               <img
-                                src={uploadedFileUrl}
+                                src={adCreative.media_url}
                                 alt="Uploaded ad media"
                                 className="h-12 w-12 object-cover rounded border border-gray-200"
                               />
                             ) : (
                               <video
-                                src={uploadedFileUrl}
+                                src={adCreative.media_url}
                                 className="h-12 w-12 object-cover rounded border border-gray-200"
                                 muted
                               />
@@ -886,23 +899,6 @@ export default function SessionsPage() {
                           <option value="BOOK_NOW">Book Now</option>
                           <option value="APPLY_NOW">Apply Now</option>
                         </select>
-                        {uploadedFileUrl && (
-                          <div className="flex-shrink-0">
-                            {uploadedFileUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
-                              <img
-                                src={uploadedFileUrl}
-                                alt="Ad media"
-                                className="h-8 w-8 object-cover rounded border border-gray-200"
-                              />
-                            ) : (
-                              <video
-                                src={uploadedFileUrl}
-                                className="h-8 w-8 object-cover rounded border border-gray-200"
-                                muted
-                              />
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                     <div>
@@ -1164,7 +1160,7 @@ export default function SessionsPage() {
                     Cancel
                   </button>
                   <button
-                    onClick={handleSaveCreativeAd}
+                    onClick={handleCreativeAdSave}
                     className="px-4 py-2 bg-zuck-500 text-white rounded-lg hover:bg-zuck-600 transition-colors"
                   >
                     Save Settings

@@ -125,7 +125,7 @@ Focus on practical, actionable improvements that can be tested immediately.`
       }
 
       // Parse the response to extract variations
-      const variations = []
+      const variations: any[] = []
       const variationRegex = /=== VARIATION (\d+) ===\n([\s\S]*?)(?=== VARIATION \d+ ===|$)/g
       let match
 
@@ -175,6 +175,7 @@ Focus on practical, actionable improvements that can be tested immediately.`
       }
 
       // Store recommendations in ad_recommendations table
+      let storedRecommendations: any[] = []
       if (variations.length > 0) {
         const recommendationData = variations.map(rec => ({
           ad_id: adData.id,
@@ -186,12 +187,15 @@ Focus on practical, actionable improvements that can be tested immediately.`
           ai_score: rec.ai_score,
         }))
 
-        const { error: recError } = await supabase
+        const { data: storedRecs, error: recError } = await supabase
           .from('ad_recommendations')
           .insert(recommendationData)
+          .select()
 
         if (recError) {
           console.error('Error storing recommendations:', recError)
+        } else {
+          storedRecommendations = storedRecs || []
         }
       }
 
@@ -213,7 +217,11 @@ Focus on practical, actionable improvements that can be tested immediately.`
       }
 
       finalAnalysis = cleanResponse
-      finalRecommendations = variations
+      finalRecommendations = storedRecommendations.map((storedRec, index) => ({
+        ...variations[index],
+        id: storedRec.id, // Use the actual database UUID
+        db_id: storedRec.id // Keep the UUID for reference
+      }))
       finalScore = variations.reduce((sum, v) => sum + v.ai_score, 0) / variations.length
 
     } else if (phase === 'follow_up') {

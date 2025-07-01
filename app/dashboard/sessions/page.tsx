@@ -42,6 +42,18 @@ export default function SessionsPage() {
   const [recommendations, setRecommendations] = useState<AdRecommendation[]>([])
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([])
   const [sessionPhase, setSessionPhase] = useState<'initial' | 'follow_up' | 'performance_review'>('initial')
+  const [selectedRecommendationData, setSelectedRecommendationData] = useState<any[]>([])
+  const [savedRecommendations, setSavedRecommendations] = useState<any[]>([])
+  const [adResults, setAdResults] = useState({
+    impressions: '',
+    clicks: '',
+    spend: '',
+    conversions: '',
+    conversion_rate: '',
+    ctr: '',
+    cpc: '',
+    cpm: ''
+  })
 
   const [adCreative, setAdCreative] = useState<AdCreativeState>({
     headline: '',
@@ -264,6 +276,136 @@ export default function SessionsPage() {
     toast.success('Creative ad settings saved!')
   }
 
+  const handleAdResultsSave = async () => {
+    try {
+      if (!currentSession?.id) {
+        toast.error('No active session found')
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        toast.error('User not authenticated')
+        return
+      }
+
+      // Get the ad ID from the current session
+      const { data: adData, error: adError } = await supabase
+        .from('ads')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (adError || !adData) {
+        toast.error('Could not find ad data')
+        return
+      }
+
+      // Save ad results
+      const { error: resultsError } = await supabase
+        .from('ad_results')
+        .insert([
+          {
+            ad_id: adData.id,
+            impressions: adResults.impressions ? parseInt(adResults.impressions) : null,
+            clicks: adResults.clicks ? parseInt(adResults.clicks) : null,
+            spend: adResults.spend ? parseFloat(adResults.spend) : null,
+            conversions: adResults.conversions ? parseInt(adResults.conversions) : null,
+            conversion_rate: adResults.conversion_rate ? parseFloat(adResults.conversion_rate) : null,
+            ctr: adResults.ctr ? parseFloat(adResults.ctr) : null,
+            cpc: adResults.cpc ? parseFloat(adResults.cpc) : null,
+            cpm: adResults.cpm ? parseFloat(adResults.cpm) : null,
+          }
+        ])
+
+      if (resultsError) {
+        console.error('Error saving ad results:', resultsError)
+        toast.error('Failed to save ad results')
+        return
+      }
+
+      toast.success('Ad results saved successfully!')
+      setShowCreativeModal(false)
+      
+      // Clear the form
+      setAdResults({
+        impressions: '',
+        clicks: '',
+        spend: '',
+        conversions: '',
+        conversion_rate: '',
+        ctr: '',
+        cpc: '',
+        cpm: ''
+      })
+
+    } catch (error) {
+      console.error('Error saving ad results:', error)
+      toast.error('Failed to save ad results')
+    }
+  }
+
+  const fetchSavedRecommendations = async () => {
+    try {
+      if (!currentSession?.id) {
+        console.error('No active session found')
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        console.error('User not authenticated')
+        return
+      }
+
+      // Get the ad ID from the current session
+      const { data: adData, error: adError } = await supabase
+        .from('ads')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (adError || !adData) {
+        console.error('Could not find ad data')
+        return
+      }
+
+      // Fetch saved recommendations from the database by joining with selected_recommendations
+      const { data: recommendationsData, error: recommendationsError } = await supabase
+        .from('selected_recommendations')
+        .select(`
+          *,
+          ad_recommendations (
+            id,
+            headline,
+            primary_text,
+            call_to_action,
+            targeting,
+            budget_recommendation,
+            ai_score,
+            created_at
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (recommendationsError) {
+        console.error('Error fetching saved recommendations:', recommendationsError)
+        return
+      }
+
+      setSavedRecommendations(recommendationsData || [])
+      console.log('Saved recommendations:', recommendationsData)
+
+    } catch (error) {
+      console.error('Error fetching saved recommendations:', error)
+    }
+  }
+
   const sendMessage = async () => {
     if (!newMessage.trim()) return
 
@@ -437,16 +579,81 @@ export default function SessionsPage() {
 
   const handleRecommendationSelection = async (selectedId: string) => {
     const isSelected = selectedRecommendations.includes(selectedId)
-    let newSelectedIds: string[]
+    let newSelectedIds: string[] = []
     
-    if (isSelected) {
-      newSelectedIds = selectedRecommendations.filter(id => id !== selectedId)
-    } else {
-      newSelectedIds = [...selectedRecommendations, selectedId]
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        toast.error('User not authenticated')
+        return
+      }
+
+      // Get the current ad ID
+      const { data: adData, error: adError } = await supabase
+        .from('ads')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (adError || !adData) {
+        console.error('Could not find ad data')
+        toast.error('Could not find ad data')
+        return
+      }
+
+      if (isSelected) {
+        newSelectedIds = selectedRecommendations.filter(id => id !== selectedId)
+        // Remove from selected data
+        setSelectedRecommendationData(prev => prev.filter(rec => rec.id !== selectedId))
+        
+        // Remove from selected_recommendations table using the actual UUID
+        const { error: deleteError } = await supabase
+          .from('selected_recommendations')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('recommendation_id', selectedId)
+        
+        if (deleteError) {
+          console.error('Error removing selected recommendation:', deleteError)
+        }
+      } else {
+        newSelectedIds = [...selectedRecommendations, selectedId]
+        // Add to selected data - find the recommendation in messages
+        const allRecommendations = messages
+          .filter(msg => msg.recommendations)
+          .flatMap(msg => msg.recommendations || [])
+        const selectedRec = allRecommendations.find(rec => rec.id === selectedId || rec.db_id === selectedId)
+        if (selectedRec) {
+          setSelectedRecommendationData(prev => [...prev, selectedRec])
+        }
+        
+        // Add to selected_recommendations table using the actual UUID
+        const { error: insertError } = await supabase
+          .from('selected_recommendations')
+          .insert([
+            {
+              user_id: user.id,
+              recommendation_id: selectedId,
+              status: 'draft'
+            }
+          ])
+        
+        if (insertError) {
+          console.error('Error saving selected recommendation:', insertError)
+          toast.error('Failed to save selection')
+          return
+        }
+      }
+      
+      setSelectedRecommendations(newSelectedIds)
+      console.log('Selected recommendations:', newSelectedIds)
+      
+    } catch (error) {
+      console.error('Error handling recommendation selection:', error)
+      toast.error('Failed to update selection')
     }
-    
-    setSelectedRecommendations(newSelectedIds)
-    console.log('Selected recommendations:', newSelectedIds)
     
     // If this is the first selection, trigger AI response
     if (newSelectedIds.length === 1 && !isSelected) {
@@ -602,8 +809,8 @@ export default function SessionsPage() {
 
       {/* Main Content - Chat Interface */}
       <div className="flex-1 flex flex-col relative">
-        {/* Chat Messages - With reduced top padding */}
-        <div className="flex-1 overflow-y-auto p-4 pt-48" aria-label="messages">
+        {/* Chat Messages - With padding for fixed input */}
+        <div className="flex-1 overflow-y-auto p-4 pt-48 pb-24" aria-label="messages">
           <div className="max-w-4xl mx-auto space-y-4">
             {messages.length === 0 && (
               <div className="text-center py-12">
@@ -753,8 +960,8 @@ export default function SessionsPage() {
                                 )}
                                 <input
                                   type="checkbox"
-                                  checked={selectedRecommendations.includes(rec.id || `variation_${recIndex + 1}`)}
-                                  onChange={() => handleRecommendationSelection(rec.id || `variation_${recIndex + 1}`)}
+                                                                      checked={selectedRecommendations.includes(rec.id || rec.db_id || `variation_${recIndex + 1}`)}
+                                  onChange={() => handleRecommendationSelection(rec.id || rec.db_id || `variation_${recIndex + 1}`)}
                                   className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                                   aria-label="checkbox-ai"
                                 />
@@ -803,8 +1010,8 @@ export default function SessionsPage() {
           </div>
         </div>
 
-        {/* Chat Input */}
-        <div className="bg-white border-t border-gray-200 p-4">
+        {/* Chat Input - Fixed Position */}
+        <div className="fixed bottom-0 left-80 right-0 bg-white border-t border-gray-200 p-4 z-10">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center space-x-2">
               <div className="flex-1 relative">
@@ -842,7 +1049,10 @@ export default function SessionsPage() {
               {/* Show Follow Up button if creative ad configured and first message sent */}
               {creativeAdConfigured && firstMessageSent && (
                 <button
-                  onClick={() => setShowCreativeModal(true)}
+                  onClick={async () => {
+                    await fetchSavedRecommendations()
+                    setShowCreativeModal(true)
+                  }}
                   aria-label="creative ad"
                   className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium"
                 >
@@ -872,15 +1082,15 @@ export default function SessionsPage() {
           </div>
         </div>
 
-
-
         {/* Creative Ad Modal */}
         {showCreativeModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">Creative Ad Settings</h2>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {firstMessageSent ? 'Follow Up - Ad Results' : 'Creative Ad Settings'}
+                  </h2>
                   <button
                     onClick={() => setShowCreativeModal(false)}
                     className="text-gray-400 hover:text-gray-600"
@@ -889,9 +1099,12 @@ export default function SessionsPage() {
                   </button>
                 </div>
 
-                {/* Ad Creative Section */}
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-900 mb-4">Ad Creative</h3>
+                {!firstMessageSent ? (
+                  // Initial Creative Ad Form
+                  <>
+                    {/* Ad Creative Section */}
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">Ad Creative</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1254,6 +1467,176 @@ export default function SessionsPage() {
                     Save Settings
                   </button>
                 </div>
+                  </>
+                ) : (
+                  // Follow Up - Selected Recommendations and Ad Results
+                  <>
+                    {/* Saved Recommendations Section */}
+                    {savedRecommendations.length > 0 && (
+                      <div className="mb-6">
+                        <h3 className="text-lg font-medium text-gray-900 mb-4">Saved Recommendations from Database</h3>
+                        <div className="space-y-3">
+                          {savedRecommendations.map((selectedRec, index) => {
+                            const rec = selectedRec.ad_recommendations
+                            if (!rec) return null
+                            
+                            return (
+                              <div key={index} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <h4 className="font-medium text-gray-900 mb-2">{rec.headline || 'Ad Recommendation'}</h4>
+                                    <p className="text-sm text-gray-600 mb-2">{rec.primary_text}</p>
+                                    <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                      {rec.call_to_action && <span>CTA: {rec.call_to_action}</span>}
+                                      {rec.targeting && <span>Targeting: {rec.targeting}</span>}
+                                      {rec.budget_recommendation && <span>Budget: {rec.budget_recommendation}</span>}
+                                      {rec.ai_score && <span>AI Score: {(rec.ai_score * 100).toFixed(0)}%</span>}
+                                      {rec.created_at && <span>Created: {new Date(rec.created_at).toLocaleDateString()}</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {savedRecommendations.length === 0 && (
+                      <div className="mb-6">
+                        <div className="p-4 border border-gray-200 rounded-lg bg-yellow-50">
+                          <p className="text-sm text-yellow-800">
+                            No saved recommendations found. Make sure to select recommendations during your chat session.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ad Results Section */}
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">Campaign Performance Results</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Impressions
+                          </label>
+                          <input
+                            type="number"
+                            value={adResults.impressions}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, impressions: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Clicks
+                          </label>
+                          <input
+                            type="number"
+                            value={adResults.clicks}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, clicks: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Spend ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adResults.spend}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, spend: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Conversions
+                          </label>
+                          <input
+                            type="number"
+                            value={adResults.conversions}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, conversions: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Conversion Rate (%)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adResults.conversion_rate}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, conversion_rate: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            CTR (%)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adResults.ctr}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, ctr: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            CPC ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adResults.cpc}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, cpc: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            CPM ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={adResults.cpm}
+                            onChange={(e) => setAdResults(prev => ({ ...prev, cpm: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Follow Up Modal Actions */}
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={() => setShowCreativeModal(false)}
+                        className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleAdResultsSave}
+                        className="px-4 py-2 bg-zuck-500 text-white rounded-lg hover:bg-zuck-600 transition-colors"
+                      >
+                        Save Results
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

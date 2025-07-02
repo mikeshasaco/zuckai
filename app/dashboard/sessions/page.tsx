@@ -73,9 +73,19 @@ export default function SessionsPage() {
 
   const router = useRouter()
 
-  // Load sessions on mount
+  // Load sessions on mount and check for session parameter
   useEffect(() => {
     loadSessions()
+    
+    // Check for session parameter in URL
+    const urlParams = new URLSearchParams(window.location.search)
+    const sessionId = urlParams.get('session')
+    if (sessionId) {
+      // Load the specific session after sessions are loaded
+      setTimeout(() => {
+        loadSession(sessionId)
+      }, 100)
+    }
   }, [])
 
   // Check authentication on mount
@@ -193,13 +203,28 @@ export default function SessionsPage() {
 
   const loadSession = async (sessionId: string) => {
     try {
-      const { data: session, error } = await supabase
+      // Try to load by session_id first (for URL parameters), then by id (for sidebar clicks)
+      let { data: session, error } = await supabase
         .from('analysis_sessions')
         .select('*')
-        .eq('id', sessionId)
+        .eq('session_id', sessionId)
         .single()
 
-      if (error) throw error
+      if (error) {
+        // If not found by session_id, try by id
+        const { data: sessionById, error: errorById } = await supabase
+          .from('analysis_sessions')
+          .select('*')
+          .eq('id', sessionId)
+          .single()
+        
+        if (errorById) throw errorById
+        session = sessionById
+      }
+
+      // Update the URL to reflect the current session using session_id
+      const newUrl = `/dashboard/sessions?session=${session.session_id}`
+      window.history.pushState({}, '', newUrl)
 
       setCurrentSession(session)
       setMessages(session.messages || [])
@@ -776,21 +801,21 @@ export default function SessionsPage() {
             </button>
           </div>
           <Link
-            href="/dashboard/analysis-zuck"
+            href="/dashboard/new-chat"
             className="w-full flex items-center justify-center px-4 py-2 bg-zuck-600 text-white rounded-lg hover:bg-zuck-700"
           >
             <Plus className="h-4 w-4 mr-2" />
-            New Analysis
+            New Chat
           </Link>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4">
-            <h3 className="text-sm font-medium text-gray-700 mb-3">Analysis Sessions</h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Chat Sessions</h3>
             {sessions.map((session) => (
               <div
                 key={session.id}
-                onClick={() => loadSession(session.id)}
+                onClick={() => loadSession(session.session_id || session.id)}
                 className={`p-3 rounded-lg cursor-pointer mb-2 transition-colors ${
                   currentSession?.id === session.id
                     ? 'bg-zuck-50 border border-zuck-200'
@@ -800,9 +825,14 @@ export default function SessionsPage() {
                 <div className="flex items-center">
                   <MessageSquare className="h-4 w-4 text-gray-400 mr-2" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {session.title}
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {session.title}
+                      </p>
+                      <span className="text-xs text-blue-600 font-mono bg-blue-50 px-2 py-1 rounded border border-blue-200" title={session.session_id || 'N/A'}>
+                        #{session.session_id ? session.session_id.substring(0, 8) + '...' : 'N/A'}
+                      </span>
+                    </div>
                     <p className="text-xs text-gray-500">
                       {new Date(session.created_at).toLocaleDateString()}
                     </p>
@@ -814,7 +844,7 @@ export default function SessionsPage() {
               <div className="text-center py-8">
                 <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-sm text-gray-500 mb-4">
-                  No sessions yet. Start chatting to create your first session!
+                  No chat sessions yet. Start a new chat to begin your conversation with Zuck AI!
                 </p>
               </div>
             )}
@@ -834,16 +864,10 @@ export default function SessionsPage() {
                   Welcome to Zuck AI!
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  {creativeAdConfigured 
-                    ? "I'm here to help you optimize your Facebook advertising strategy. Ask me anything about your ads, targeting, or campaign optimization."
-                    : "To get started, please configure your creative ad settings first. I'll analyze your ad and generate 2-3 improved variations with detailed targeting recommendations."
-                  }
+                  I'm here to help you optimize your Facebook advertising strategy. Ask me anything about your ads, targeting, or campaign optimization.
                 </p>
                 <div className="text-sm text-gray-500">
-                  {creativeAdConfigured 
-                    ? "💡 Try asking: 'How can I improve my ad performance?' or 'What targeting should I use?'"
-                    : "📝 Configure your ad details and I'll generate optimized variations for better performance."
-                  }
+                  💡 Try asking: 'How can I improve my ad performance?' or 'What targeting should I use?'
                 </div>
               </div>
             )}

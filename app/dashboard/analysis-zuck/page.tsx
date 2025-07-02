@@ -7,6 +7,29 @@ import { Brain, ArrowLeft, Upload } from 'lucide-react'
 import Link from 'next/link'
 import toast from 'react-hot-toast'
 
+// Function to generate a unique session identifier
+const generateSessionId = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  let result = ''
+  
+  // Use crypto.randomBytes for better randomness if available
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint8Array(16)
+    window.crypto.getRandomValues(array)
+    
+    for (let i = 0; i < 16; i++) {
+      result += chars.charAt(array[i] % chars.length)
+    }
+  } else {
+    // Fallback to Math.random for older browsers
+    for (let i = 0; i < 16; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+  }
+  
+  return result
+}
+
 export default function AnalysisZuckPage() {
   const [loading, setLoading] = useState(false)
   const [companyDescription, setCompanyDescription] = useState('')
@@ -34,6 +57,7 @@ export default function AnalysisZuckPage() {
         return
       }
 
+      const sessionId = generateSessionId()
       const { data, error } = await supabase
         .from('analysis_sessions')
         .insert([
@@ -42,7 +66,8 @@ export default function AnalysisZuckPage() {
             title: `Analysis ${new Date().toLocaleDateString()}`,
             company_description: companyDescription,
             ad_creative: adCreative,
-            messages: []
+            messages: [],
+            session_id: sessionId
           }
         ])
         .select()

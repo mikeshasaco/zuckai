@@ -87,6 +87,7 @@ export interface AnalysisSession {
   company_description: string
   ad_creative?: AdCreative
   messages: ChatMessage[]
+  session_id?: string
   created_at: string
   updated_at: string
 }

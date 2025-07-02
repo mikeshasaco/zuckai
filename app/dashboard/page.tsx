@@ -125,7 +125,7 @@ export default function DashboardPage() {
             Welcome to Zuck AI
           </h1>
           <p className="text-gray-600">
-            Your AI-powered Facebook Ads assistant. Get intelligent recommendations and optimize your campaigns.
+            Your AI-powered Facebook Ads assistant. Chat with Zuck AI to get intelligent recommendations and optimize your campaigns.
           </p>
         </div>
 
@@ -136,14 +136,14 @@ export default function DashboardPage() {
           </div>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <Link
-              href="/dashboard/analysis-zuck"
+              href="/dashboard/new-chat"
               className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center">
                 <Plus className="h-8 w-8 text-zuck-600 mr-4" />
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">New Analysis</h3>
-                  <p className="text-gray-600">Start a new AI analysis session</p>
+                  <h3 className="text-lg font-semibold text-gray-900">New Chat</h3>
+                  <p className="text-gray-600">Start a fresh conversation with Zuck AI</p>
                 </div>
               </div>
             </Link>
@@ -167,7 +167,7 @@ export default function DashboardPage() {
         <div className="bg-white rounded-lg shadow-sm">
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900">Recent Analysis Sessions</h2>
+              <h2 className="text-xl font-semibold text-gray-900">Recent Chat Sessions</h2>
               <Link
                 href="/dashboard/sessions"
                 className="text-zuck-600 hover:text-zuck-700 font-medium"
@@ -181,16 +181,16 @@ export default function DashboardPage() {
             {sessions.length === 0 ? (
               <div className="px-6 py-12 text-center">
                 <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No analysis sessions yet</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No chat sessions yet</h3>
                 <p className="text-gray-600 mb-4">
-                  Start your first AI analysis to get personalized Facebook Ads recommendations.
+                  Start your first conversation with Zuck AI to get personalized Facebook Ads recommendations.
                 </p>
                 <Link
-                  href="/dashboard/sessions"
+                  href="/dashboard/new-chat"
                   className="inline-flex items-center px-4 py-2 bg-zuck-600 text-white rounded-lg hover:bg-zuck-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Start First Analysis
+                  Start First Chat
                 </Link>
               </div>
             ) : (
@@ -237,7 +237,7 @@ export default function DashboardPage() {
                 <MessageSquare className="h-8 w-8 text-zuck-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Sessions</p>
+                <p className="text-sm font-medium text-gray-600">Total Chats</p>
                 <p className="text-2xl font-semibold text-gray-900">{sessions.length}</p>
               </div>
             </div>
@@ -249,7 +249,7 @@ export default function DashboardPage() {
                 <Brain className="h-8 w-8 text-zuck-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">AI Interactions</p>
+                <p className="text-sm font-medium text-gray-600">Messages</p>
                 <p className="text-2xl font-semibold text-gray-900">
                   {sessions.reduce((total, session) => total + getMessageCount(session.messages), 0)}
                 </p>

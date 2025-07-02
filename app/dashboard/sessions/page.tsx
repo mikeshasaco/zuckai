@@ -41,19 +41,20 @@ export default function SessionsPage() {
   const [showCreativeModal, setShowCreativeModal] = useState(false)
   const [recommendations, setRecommendations] = useState<AdRecommendation[]>([])
   const [selectedRecommendations, setSelectedRecommendations] = useState<string[]>([])
+  const [currentSessionSelections, setCurrentSessionSelections] = useState<string[]>([])
   const [sessionPhase, setSessionPhase] = useState<'initial' | 'follow_up' | 'performance_review'>('initial')
   const [selectedRecommendationData, setSelectedRecommendationData] = useState<any[]>([])
   const [savedRecommendations, setSavedRecommendations] = useState<any[]>([])
-  const [adResults, setAdResults] = useState({
-    impressions: '',
-    clicks: '',
-    spend: '',
-    conversions: '',
-    conversion_rate: '',
-    ctr: '',
-    cpc: '',
-    cpm: ''
-  })
+  const [adResults, setAdResults] = useState<{[key: string]: {
+    impressions: string
+    clicks: string
+    spend: string
+    conversions: string
+    conversion_rate: string
+    ctr: string
+    cpc: string
+    cpm: string
+  }}>({})
 
   const [adCreative, setAdCreative] = useState<AdCreativeState>({
     headline: '',
@@ -226,6 +227,25 @@ export default function SessionsPage() {
 
       // Check if first message has been sent (more than 0 messages)
       setFirstMessageSent((session.messages || []).length > 0)
+      
+      // Clear current session selections and load recommendations
+      setCurrentSessionSelections([])
+      setSelectedRecommendationData([])
+      
+      // Extract recommendations from messages and set selected ones
+      const allRecommendations = session.messages
+        ?.filter((msg: any) => msg.recommendations)
+        .flatMap((msg: any) => msg.recommendations || []) || []
+      
+      setRecommendations(allRecommendations)
+      
+      // Find selected recommendations from the session
+      const selectedIds = allRecommendations
+        .filter((rec: any) => rec.is_selected)
+        .map((rec: any) => rec.id || rec.db_id)
+      
+      setCurrentSessionSelections(selectedIds)
+      setSelectedRecommendationData(allRecommendations.filter((rec: any) => rec.is_selected))
     } catch (error) {
       console.error('Error loading session:', error)
       toast.error('Failed to load session')
@@ -303,43 +323,37 @@ export default function SessionsPage() {
         return
       }
 
-      // Save ad results
-      const { error: resultsError } = await supabase
-        .from('ad_results')
-        .insert([
-          {
-            ad_id: adData.id,
-            impressions: adResults.impressions ? parseInt(adResults.impressions) : null,
-            clicks: adResults.clicks ? parseInt(adResults.clicks) : null,
-            spend: adResults.spend ? parseFloat(adResults.spend) : null,
-            conversions: adResults.conversions ? parseInt(adResults.conversions) : null,
-            conversion_rate: adResults.conversion_rate ? parseFloat(adResults.conversion_rate) : null,
-            ctr: adResults.ctr ? parseFloat(adResults.ctr) : null,
-            cpc: adResults.cpc ? parseFloat(adResults.cpc) : null,
-            cpm: adResults.cpm ? parseFloat(adResults.cpm) : null,
-          }
-        ])
+      // Save ad results for each selected recommendation
+      const resultsToSave = Object.entries(adResults).map(([recommendationId, results]) => ({
+        ad_id: adData.id,
+        recommendation_id: recommendationId,
+        impressions: results.impressions ? parseInt(results.impressions) : null,
+        clicks: results.clicks ? parseInt(results.clicks) : null,
+        spend: results.spend ? parseFloat(results.spend) : null,
+        conversions: results.conversions ? parseInt(results.conversions) : null,
+        conversion_rate: results.conversion_rate ? parseFloat(results.conversion_rate) : null,
+        ctr: results.ctr ? parseFloat(results.ctr) : null,
+        cpc: results.cpc ? parseFloat(results.cpc) : null,
+        cpm: results.cpm ? parseFloat(results.cpm) : null,
+      }))
 
-      if (resultsError) {
-        console.error('Error saving ad results:', resultsError)
-        toast.error('Failed to save ad results')
-        return
+      if (resultsToSave.length > 0) {
+        const { error: resultsError } = await supabase
+          .from('ad_results')
+          .insert(resultsToSave)
+
+        if (resultsError) {
+          console.error('Error saving ad results:', resultsError)
+          toast.error('Failed to save ad results')
+          return
+        }
       }
 
       toast.success('Ad results saved successfully!')
       setShowCreativeModal(false)
       
       // Clear the form
-      setAdResults({
-        impressions: '',
-        clicks: '',
-        spend: '',
-        conversions: '',
-        conversion_rate: '',
-        ctr: '',
-        cpc: '',
-        cpm: ''
-      })
+      setAdResults({})
 
     } catch (error) {
       console.error('Error saving ad results:', error)
@@ -374,7 +388,7 @@ export default function SessionsPage() {
         return
       }
 
-      // Fetch saved recommendations from the database by joining with selected_recommendations
+      // Fetch recommendations that are currently selected in this session
       const { data: recommendationsData, error: recommendationsError } = await supabase
         .from('selected_recommendations')
         .select(`
@@ -391,6 +405,7 @@ export default function SessionsPage() {
           )
         `)
         .eq('user_id', user.id)
+        .in('recommendation_id', currentSessionSelections)
         .order('created_at', { ascending: false })
 
       if (recommendationsError) {
@@ -399,7 +414,7 @@ export default function SessionsPage() {
       }
 
       setSavedRecommendations(recommendationsData || [])
-      console.log('Saved recommendations:', recommendationsData)
+      console.log('Current session saved recommendations:', recommendationsData)
 
     } catch (error) {
       console.error('Error fetching saved recommendations:', error)
@@ -578,7 +593,7 @@ export default function SessionsPage() {
   }
 
   const handleRecommendationSelection = async (selectedId: string) => {
-    const isSelected = selectedRecommendations.includes(selectedId)
+    const isSelected = currentSessionSelections.includes(selectedId)
     let newSelectedIds: string[] = []
     
     try {
@@ -604,7 +619,7 @@ export default function SessionsPage() {
       }
 
       if (isSelected) {
-        newSelectedIds = selectedRecommendations.filter(id => id !== selectedId)
+        newSelectedIds = currentSessionSelections.filter(id => id !== selectedId)
         // Remove from selected data
         setSelectedRecommendationData(prev => prev.filter(rec => rec.id !== selectedId))
         
@@ -619,7 +634,7 @@ export default function SessionsPage() {
           console.error('Error removing selected recommendation:', deleteError)
         }
       } else {
-        newSelectedIds = [...selectedRecommendations, selectedId]
+        newSelectedIds = [...currentSessionSelections, selectedId]
         // Add to selected data - find the recommendation in messages
         const allRecommendations = messages
           .filter(msg => msg.recommendations)
@@ -647,8 +662,8 @@ export default function SessionsPage() {
         }
       }
       
-      setSelectedRecommendations(newSelectedIds)
-      console.log('Selected recommendations:', newSelectedIds)
+      setCurrentSessionSelections(newSelectedIds)
+      console.log('Current session selected recommendations:', newSelectedIds)
       
     } catch (error) {
       console.error('Error handling recommendation selection:', error)
@@ -960,7 +975,7 @@ export default function SessionsPage() {
                                 )}
                                 <input
                                   type="checkbox"
-                                                                      checked={selectedRecommendations.includes(rec.id || rec.db_id || `variation_${recIndex + 1}`)}
+                                                                      checked={currentSessionSelections.includes(rec.id || rec.db_id || `variation_${recIndex + 1}`)}
                                   onChange={() => handleRecommendationSelection(rec.id || rec.db_id || `variation_${recIndex + 1}`)}
                                   className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                                   aria-label="checkbox-ai"
@@ -1512,111 +1527,183 @@ export default function SessionsPage() {
                       </div>
                     )}
 
-                    {/* Ad Results Section */}
+                    {/* Ad Results Section - Individual Forms for Each Recommendation */}
                     <div className="mb-6">
                       <h3 className="text-lg font-medium text-gray-900 mb-4">Campaign Performance Results</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Impressions
-                          </label>
-                          <input
-                            type="number"
-                            value={adResults.impressions}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, impressions: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Clicks
-                          </label>
-                          <input
-                            type="number"
-                            value={adResults.clicks}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, clicks: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Spend ($)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adResults.spend}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, spend: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Conversions
-                          </label>
-                          <input
-                            type="number"
-                            value={adResults.conversions}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, conversions: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Conversion Rate (%)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adResults.conversion_rate}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, conversion_rate: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            CTR (%)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adResults.ctr}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, ctr: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            CPC ($)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adResults.cpc}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, cpc: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            CPM ($)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={adResults.cpm}
-                            onChange={(e) => setAdResults(prev => ({ ...prev, cpm: e.target.value }))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
+                      <div className="space-y-6">
+                        {savedRecommendations.map((selectedRec, index) => {
+                          const rec = selectedRec.ad_recommendations
+                          if (!rec) return null
+                          
+                          const recommendationId = rec.id
+                          const currentResults = adResults[recommendationId] || {
+                            impressions: '',
+                            clicks: '',
+                            spend: '',
+                            conversions: '',
+                            conversion_rate: '',
+                            ctr: '',
+                            cpc: '',
+                            cpm: ''
+                          }
+                          
+                          return (
+                            <div key={index} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                              <h4 className="font-medium text-gray-900 mb-3">{rec.headline || 'Ad Recommendation'}</h4>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Impressions
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={currentResults.impressions}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        impressions: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Clicks
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={currentResults.clicks}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        clicks: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Spend ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentResults.spend}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        spend: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Conversions
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={currentResults.conversions}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        conversions: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Conversion Rate (%)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentResults.conversion_rate}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        conversion_rate: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    CTR (%)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentResults.ctr}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        ctr: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    CPC ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentResults.cpc}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        cpc: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    CPM ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentResults.cpm}
+                                    onChange={(e) => setAdResults(prev => ({
+                                      ...prev,
+                                      [recommendationId]: {
+                                        ...currentResults,
+                                        cpm: e.target.value
+                                      }
+                                    }))}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zuck-500 focus:border-transparent"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
 
